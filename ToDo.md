@@ -18,12 +18,12 @@ All changes live in `src/signature_app/db.py` (~1–2 hrs, mechanical).
 
 ## 2. Deploy to Streamlit Community Cloud
 
-- [ ] Push repo to GitHub.
-- [ ] Create the app on share.streamlit.io, entrypoint `src/signature_app/app.py`.
-- [ ] Confirm the `src/` layout + `uv_build` backend resolves `from signature_app import db` (may need a small tweak on first deploy).
-- [ ] Add **Secrets** in the Community Cloud dashboard:
-  - [ ] Supabase Postgres connection string.
-  - [ ] `admin_password` — long random value.
+- [x] Push repo to GitHub.
+- [x] Create the app on share.streamlit.io, entrypoint `src/signature_app/app.py`.
+- [x] Confirm the `src/` layout + `uv_build` backend resolves `from signature_app import db` (worked with no changes needed).
+- [x] Add **Secrets** in the Community Cloud dashboard:
+  - [x] Supabase Postgres connection string.
+  - [x] `admin_password` — long random value.
 
 ## 3. Security — Layer 1: lock down the app (most important)
 
