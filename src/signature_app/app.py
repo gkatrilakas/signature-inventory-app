@@ -294,13 +294,23 @@ with tab_dashboard:
 
     st.divider()
     st.subheader("Χαμηλό στοκ")
-    threshold = st.slider("Όριο ειδοποίησης (ml)", min_value=0, max_value=500, value=100, step=10)
-    low_stock = db.get_low_stock_products(
-        threshold_ml=threshold, categories=categories, product_types=product_types
-    )
-    if low_stock:
-        df_low = pd.DataFrame([dict(p) for p in low_stock]).drop(columns=["id", "created_at"]).rename(columns=PRODUCT_RENAME)
-        st.dataframe(df_low, use_container_width=True, hide_index=True)
-        st.caption(f"{len(low_stock)} προϊόντα κάτω από {threshold} ml")
-    else:
-        st.success(f"Κανένα προϊόν κάτω από {threshold} ml.")
+
+    def low_stock_section(label: str, unit: str, default: int, step: int) -> None:
+        st.markdown(f"**{label}**")
+        threshold = st.number_input(
+            f"Όριο ειδοποίησης ({unit})", min_value=0,
+            value=default, step=step, key=f"low_stock_{unit}",
+        )
+        low_stock = db.get_low_stock_products(
+            threshold=threshold, categories=categories, product_types=product_types, unit=unit,
+        )
+        if low_stock:
+            df_low = pd.DataFrame([dict(p) for p in low_stock]).drop(columns=["id", "created_at"]).rename(columns=PRODUCT_RENAME)
+            st.dataframe(df_low, use_container_width=True, hide_index=True)
+            st.caption(f"{len(low_stock)} προϊόντα κάτω από {threshold} {unit}")
+        else:
+            st.success(f"Κανένα προϊόν κάτω από {threshold} {unit}.")
+
+    low_stock_section("Έλαια / Αρώματα (ml)", "ml", default=100, step=10)
+    st.divider()
+    low_stock_section("Αρωματικά χώρου (τεμάχια)", "τεμάχια", default=5, step=1)

@@ -8,6 +8,8 @@ from psycopg.rows import dict_row
 
 CATEGORIES = ["ΓΥΝΑΙΚΕΙΑ", "ΑΝΤΡΙΚΑ", "UNISEX", "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ"]
 
+PIECES_CATEGORY = "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ"
+
 PRODUCT_TYPES = ["έλαια", "άρωμα"]
 
 CATEGORY_PREFIX = {
@@ -21,7 +23,7 @@ TYPE_LETTER = {"έλαια": "E", "άρωμα": "P"}
 
 def unit_for(category: str) -> str:
     """Stock unit for a category: room fragrances are measured in pieces, everything else in ml."""
-    return "τεμάχια" if category == "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ" else "ml"
+    return "τεμάχια" if category == PIECES_CATEGORY else "ml"
 
 
 def infer_product_type(code: str) -> str:
@@ -221,10 +223,10 @@ def _product_filter(
     """Build a 'WHERE …' clause (and params) restricting to the given categories/types."""
     clauses, params = [], []
     if categories:
-        clauses.append(f"{alias}.category IN ({','.join('%s' * len(categories))})")
+        clauses.append(f"{alias}.category IN ({','.join(['%s'] * len(categories))})")
         params.extend(categories)
     if product_types:
-        clauses.append(f"{alias}.product_type IN ({','.join('%s' * len(product_types))})")
+        clauses.append(f"{alias}.product_type IN ({','.join(['%s'] * len(product_types))})")
         params.extend(product_types)
     return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
@@ -274,16 +276,24 @@ def get_dashboard_stats(
 
 
 def get_low_stock_products(
-    threshold_ml: float = 100.0,
+    threshold: float = 100.0,
     categories: list[str] | None = None,
     product_types: list[str] | None = None,
+    unit: str = "ml",
 ) -> list[dict]:
+    """Products at or below `threshold`, restricted to those tracked in `unit`.
+
+    ml and τεμάχια aren't on the same scale, so a single threshold can't mean
+    both at once — callers pick one unit per call.
+    """
     where, params = _product_filter(categories, product_types)
-    clause = f"{where} AND pr.stock_ml <= %s" if where else " WHERE pr.stock_ml <= %s"
+    unit_op = "=" if unit == "τεμάχια" else "!="
+    prefix = f"{where} AND" if where else " WHERE"
     with get_connection() as conn:
         return conn.execute(
-            f"SELECT pr.* FROM products pr{clause} ORDER BY pr.stock_ml ASC",
-            [*params, threshold_ml],
+            f"SELECT pr.* FROM products pr{prefix} pr.category {unit_op} %s "
+            "AND pr.stock_ml <= %s ORDER BY pr.stock_ml ASC",
+            [*params, PIECES_CATEGORY, threshold],
         ).fetchall()
 
 
