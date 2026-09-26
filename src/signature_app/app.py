@@ -50,27 +50,75 @@ st.title("🧴 Signature")
 st.caption("Προβολή Admin — πλήρης επεξεργασία" if is_admin else "Προβολή Πωλήσεων — μόνο ανάγνωση")
 
 
-def editable_table(key, rows, drop_cols, rename, column_config, disabled, apply_changes):
-    """Render an st.data_editor for admins; apply edits/deletes on Save."""
+def editable_table(key, rows, drop_cols, rename, column_config, disabled, apply_changes, locked=()):
+    """Render an st.data_editor for admins.
+
+    New rows are inserted as soon as they are complete; edits/deletes are
+    applied on Save. `apply_changes("insert", record)` returns None while the
+    row is still incomplete, a success message once inserted, and raises
+    ValueError for invalid input. `locked` columns can be filled in on new
+    rows but not changed on existing ones.
+    """
     base = pd.DataFrame([dict(r) for r in rows])
     display = base.drop(columns=[c for c in drop_cols if c in base.columns]).rename(columns=rename)
+    inv_rename = {v: k for k, v in rename.items()}
+
+    # Bumping the version gives the editor a fresh key, clearing its pending
+    # state once new rows are in the database and part of `rows`.
+    ver_key = f"{key}__ver"
+    editor_key = f"{key}::{st.session_state.get(ver_key, 0)}"
+    for msg in st.session_state.pop(f"{key}__flash", []):
+        st.success(msg)
 
     st.data_editor(
         display,
-        key=key,
+        key=editor_key,
         use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
         column_config=column_config,
         disabled=disabled,
     )
+    state = st.session_state[editor_key]
+
+    def insert_added_rows() -> list[str]:
+        inserted = []
+        for row in state.get("added_rows", []):
+            record = {inv_rename.get(c, c): v for c, v in row.items()}
+            try:
+                msg = apply_changes("insert", record)
+            except ValueError as e:
+                st.error(str(e))
+                continue
+            if msg:
+                inserted.append(msg)
+        return inserted
+
+    def reset_editor(messages: list[str]) -> None:
+        st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+        st.session_state[f"{key}__flash"] = messages
+        st.rerun()
+
+    has_pending = bool(state.get("edited_rows") or state.get("deleted_rows"))
+    if state.get("added_rows"):
+        if has_pending:
+            # Resetting the editor would discard unsaved edits, so let Save
+            # insert the new rows together with them.
+            st.info("Πατήστε Αποθήκευση για να καταχωρηθούν οι νέες γραμμές μαζί με τις αλλαγές.")
+        else:
+            inserted = insert_added_rows()
+            if inserted:
+                reset_editor(inserted)
 
     if st.button("💾 Αποθήκευση αλλαγών", key=f"{key}_save"):
-        state = st.session_state[key]
-        inv_rename = {v: k for k, v in rename.items()}
         n = 0
         for idx_str, changes in state.get("edited_rows", {}).items():
-            record = base.iloc[int(idx_str)].to_dict()
+            original = base.iloc[int(idx_str)].to_dict()
+            changed_locked = [c for c in locked if c in changes and changes[c] != original[inv_rename.get(c, c)]]
+            if changed_locked:
+                st.error(f"Η στήλη '{changed_locked[0]}' δεν αλλάζει σε υπάρχουσες γραμμές.")
+                continue
+            record = dict(original)
             for col, val in changes.items():
                 record[inv_rename.get(col, col)] = val
             apply_changes("update", record)
@@ -78,11 +126,11 @@ def editable_table(key, rows, drop_cols, rename, column_config, disabled, apply_
         for idx in state.get("deleted_rows", []):
             apply_changes("delete", base.iloc[idx].to_dict())
             n += 1
-        if state.get("added_rows"):
-            st.warning("Νέες γραμμές αγνοήθηκαν — χρησιμοποιήστε τη φόρμα προσθήκης.")
-        st.success(f"{n} αλλαγές αποθηκεύτηκαν." if n else "Καμία αλλαγή.")
+        inserted = insert_added_rows()
+        n += len(inserted)
         if n:
-            st.rerun()
+            reset_editor([f"{n} αλλαγές αποθηκεύτηκαν."])
+        st.success("Καμία αλλαγή.")
 
 
 tab_inventory, tab_purchases, tab_sales, tab_dashboard = st.tabs(
@@ -143,17 +191,65 @@ with tab_inventory:
                 for k in ("np_house", "np_original", "np_signature", "np_stock",
                           f"np_code::{suggested}"):
                     st.session_state.pop(k, None)
-                st.success(f"Το προϊόν '{signature_name_clean}' προστέθηκε ({code_clean}).")
+                # Shown after the rerun, which would otherwise wipe it immediately.
+                st.session_state["np_flash"] = (
+                    f"Το προϊόν '{signature_name_clean}' προστέθηκε ({code_clean})."
+                )
                 st.rerun()
+        if msg := st.session_state.pop("np_flash", None):
+            st.success(msg)
         st.divider()
 
     st.subheader("Προϊόντα στην αποθήκη")
-    products = db.get_all_products()
-    if not products:
+    all_products = db.get_all_products()
+
+    icol1, icol2, icol3 = st.columns([2, 1, 1])
+    inv_search = icol1.text_input(
+        "Αναζήτηση", key="inv_search",
+        placeholder="Κωδικός, οίκος ή όνομα…",
+    ).strip().casefold()
+    inv_categories = icol2.multiselect("Κατηγορία", db.CATEGORIES, key="inv_categories")
+    inv_types = icol3.multiselect("Είδος Προϊόντος", db.PRODUCT_TYPES, key="inv_types")
+
+    products = [
+        p for p in all_products
+        if (not inv_categories or p["category"] in inv_categories)
+        and (not inv_types or p["product_type"] in inv_types)
+        and (not inv_search or any(
+            inv_search in (p[f] or "").casefold()
+            for f in ("code", "house", "original_name", "signature_name")
+        ))
+    ]
+    count_label = (
+        f"{len(products)} από {len(all_products)} προϊόντα"
+        if len(products) != len(all_products) else f"{len(products)} προϊόντα"
+    )
+
+    if not all_products:
         st.info("Δεν υπάρχουν ακόμα προϊόντα στη βάση.")
+    elif not products:
+        st.info("Κανένα προϊόν δεν ταιριάζει με τα φίλτρα.")
     elif is_admin:
         def apply_product(action, record):
-            if action == "update":
+            if action == "insert":
+                code = str(record.get("code") or "").strip()
+                signature_name = str(record.get("signature_name") or "").strip()
+                category = record.get("category")
+                if not (code and signature_name and category):
+                    return None
+                if db.code_exists(code):
+                    raise ValueError(f"Ο κωδικός '{code}' υπάρχει ήδη.")
+                db.add_product(
+                    code=code,
+                    category=category,
+                    house=str(record.get("house") or "").strip(),
+                    original_name=str(record.get("original_name") or "").strip(),
+                    signature_name=signature_name,
+                    stock_ml=float(record.get("stock_ml") or 0),
+                    product_type=record.get("product_type") or db.infer_product_type(code),
+                )
+                return f"Το προϊόν '{signature_name}' προστέθηκε ({code})."
+            elif action == "update":
                 db.update_product(
                     code=record["code"],
                     category=record["category"],
@@ -166,8 +262,11 @@ with tab_inventory:
             else:
                 db.delete_product(record["code"])
 
+        # Edits are applied by row position, so the editor must reset whenever
+        # the filter (and therefore the row order) changes.
+        filter_sig = f"{inv_search}|{sorted(inv_categories)}|{sorted(inv_types)}"
         editable_table(
-            key="products_editor",
+            key=f"products_editor::{filter_sig}",
             rows=products,
             drop_cols=["id", "created_at"],
             rename=PRODUCT_RENAME,
@@ -176,14 +275,18 @@ with tab_inventory:
                 "Είδος": st.column_config.SelectboxColumn(options=db.PRODUCT_TYPES),
                 "Στοκ": st.column_config.NumberColumn(help="τεμάχια για ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ, ml για τις υπόλοιπες κατηγορίες"),
             },
-            disabled=["Κωδικός"],
+            disabled=[],
             apply_changes=apply_product,
+            locked=["Κωδικός"],
         )
-        st.caption(f"{len(products)} προϊόντα — επεξεργαστείτε κελιά ή διαγράψτε γραμμές, μετά Αποθήκευση")
+        st.caption(
+            f"{count_label} — νέες γραμμές καταχωρούνται μόλις συμπληρωθούν Κωδικός, Κατηγορία "
+            "και Ονομασία· για επεξεργασία/διαγραφή πατήστε Αποθήκευση"
+        )
     else:
         df = pd.DataFrame([dict(p) for p in products]).drop(columns=["id", "created_at"]).rename(columns=PRODUCT_RENAME)
         st.dataframe(df, use_container_width=True, hide_index=True)
-        st.caption(f"{len(products)} προϊόντα συνολικά")
+        st.caption(count_label if len(products) != len(all_products) else f"{len(products)} προϊόντα συνολικά")
 
 
 def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
@@ -227,7 +330,21 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
         st.info(f"Δεν υπάρχουν ακόμα {label}.")
     elif is_admin:
         def apply_txn(action, record):
-            if action == "update":
+            if action == "insert":
+                date, code, ml = record.get("date"), record.get("code"), record.get("ml")
+                if not (date and code and ml):
+                    return None
+                try:
+                    date = datetime.date.fromisoformat(str(date).strip()).isoformat()
+                except ValueError:
+                    raise ValueError("Η ημερομηνία πρέπει να είναι της μορφής ΕΕΕΕ-ΜΜ-ΗΗ.")
+                if float(ml) <= 0:
+                    raise ValueError(f"Τα {ml_label} πρέπει να είναι μεγαλύτερα από 0.")
+                add_fn(date=date, code=code, ml=float(ml),
+                       comments=str(record.get("comments") or "").strip())
+                new_stock = db.get_product(code)["stock_ml"]
+                return f"Καταχωρήθηκε ({code}). Νέο στοκ: {new_stock:g}."
+            elif action == "update":
                 update_fn(
                     row_id=int(record["id"]),
                     date=str(record["date"]),
@@ -243,11 +360,19 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
             rows=rows,
             drop_cols=["signature_name", "category"],
             rename=rename,
-            column_config={ml_label: st.column_config.NumberColumn(step=10.0)},
-            disabled=["Κωδικός"],
+            column_config={
+                ml_label: st.column_config.NumberColumn(step=10.0),
+                "Κωδικός": st.column_config.SelectboxColumn(options=list(options.values())),
+                "Ημερομηνία": st.column_config.TextColumn(help="ΕΕΕΕ-ΜΜ-ΗΗ"),
+            },
+            disabled=["id"],
             apply_changes=apply_txn,
+            locked=["Κωδικός"],
         )
-        st.caption(f"{len(rows)} εγγραφές — Κωδικός δεν αλλάζει· το στοκ ενημερώνεται αυτόματα")
+        st.caption(
+            f"{len(rows)} εγγραφές — νέες γραμμές καταχωρούνται μόλις συμπληρωθούν Ημερομηνία, "
+            f"Κωδικός και {ml_label}· Κωδικός δεν αλλάζει σε υπάρχουσες· το στοκ ενημερώνεται αυτόματα"
+        )
     else:
         df = pd.DataFrame([dict(r) for r in rows]).drop(columns=["id"]).rename(columns=rename)
         st.dataframe(df, use_container_width=True, hide_index=True)
