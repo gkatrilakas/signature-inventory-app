@@ -5,6 +5,7 @@ import os
 import psycopg
 import streamlit as st
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 CATEGORIES = ["ΓΥΝΑΙΚΕΙΑ", "ΑΝΤΡΙΚΑ", "UNISEX", "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ"]
 
@@ -68,10 +69,31 @@ def db_url() -> str:
     return url
 
 
-def get_connection() -> psycopg.Connection:
-    # prepare_threshold=None disables server-side prepared statements, which
-    # break under Supabase's transaction-mode connection pooler (pgbouncer).
-    return psycopg.connect(db_url(), row_factory=dict_row, sslmode="require", prepare_threshold=None)
+@st.cache_resource
+def _pool(url: str) -> ConnectionPool:
+    """Connection pool shared across Streamlit reruns and sessions.
+
+    Opening a connection to Supabase takes ~0.5–0.8 s, so reusing them is what
+    keeps page loads fast. `check` pings each connection before handing it out
+    so one dropped by the server while idle is replaced instead of failing.
+    """
+    return ConnectionPool(
+        url,
+        min_size=1,
+        max_size=5,
+        max_idle=300,
+        open=True,
+        check=ConnectionPool.check_connection,
+        # prepare_threshold=None disables server-side prepared statements, which
+        # break under Supabase's transaction-mode connection pooler (pgbouncer).
+        kwargs={"row_factory": dict_row, "sslmode": "require", "prepare_threshold": None},
+    )
+
+
+def get_connection():
+    """Borrow a pooled connection: `with get_connection() as conn:` commits on
+    success, rolls back on error, then returns the connection to the pool."""
+    return _pool(db_url()).connection()
 
 
 def init_db() -> None:

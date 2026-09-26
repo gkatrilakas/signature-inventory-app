@@ -17,14 +17,20 @@ def admin_password() -> str:
     return os.environ.get("SIGNATURE_ADMIN_PASSWORD", "admin")
 
 
-def product_options() -> dict[str, str]:
+def product_options(products: list[dict]) -> dict[str, str]:
     """Map 'CODE — Signature name' labels to product codes, for select boxes."""
-    return {f"{p['code']} — {p['signature_name']}": p["code"] for p in db.get_all_products()}
+    return {f"{p['code']} — {p['signature_name']}": p["code"] for p in products}
+
+
+@st.cache_resource
+def init_db_once() -> None:
+    """Create/migrate the schema once per app process, not on every rerun."""
+    db.init_db()
 
 
 st.set_page_config(page_title="Signature", page_icon="🧴", layout="wide")
 
-db.init_db()
+init_db_once()
 
 with st.sidebar:
     st.header("Πρόσβαση")
@@ -133,6 +139,9 @@ def editable_table(key, rows, drop_cols, rename, column_config, disabled, apply_
         st.success("Καμία αλλαγή.")
 
 
+# Loaded once per run and shared by every tab; any write is followed by a rerun.
+all_products = db.get_all_products()
+
 tab_inventory, tab_purchases, tab_sales, tab_dashboard = st.tabs(
     ["📦 Αποθήκη", "🛒 Αγορές", "🧾 Πωλήσεις", "📊 Dashboard"]
 )
@@ -201,7 +210,6 @@ with tab_inventory:
         st.divider()
 
     st.subheader("Προϊόντα στην αποθήκη")
-    all_products = db.get_all_products()
 
     icol1, icol2, icol3 = st.columns([2, 1, 1])
     inv_search = icol1.text_input(
@@ -290,7 +298,7 @@ with tab_inventory:
 
 
 def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
-    options = product_options()
+    options = product_options(all_products)
     if is_admin:
         st.subheader(f"Καταχώρηση νέας {label}")
         if not options:
