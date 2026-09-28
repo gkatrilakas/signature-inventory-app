@@ -17,6 +17,16 @@ def admin_password() -> str:
     return os.environ.get("SIGNATURE_ADMIN_PASSWORD", "admin")
 
 
+def to_ml(value) -> float:
+    """ml amounts are kept to 2 decimal places."""
+    return round(float(value or 0), 2)
+
+
+def ml_column(**kwargs):
+    """Number column for ml amounts: accepts and shows 2 decimal places."""
+    return st.column_config.NumberColumn(format="%.2f", step=0.01, **kwargs)
+
+
 def product_options(products: list[dict]) -> dict[str, str]:
     """Map 'CODE — Signature name' labels to product codes, for select boxes."""
     return {f"{p['code']} — {p['signature_name']}": p["code"] for p in products}
@@ -175,7 +185,7 @@ with tab_inventory:
             original_name = st.text_input("Όνομα (πρωτότυπο)", key="np_original")
             signature_name = st.text_input("Ονομασία (Signature) *", key="np_signature")
             stock_ml = st.number_input(
-                "Στοκ (ml)", min_value=0.0, step=10.0, value=0.0, key="np_stock",
+                "Στοκ (ml)", min_value=0.0, step=0.01, format="%.2f", value=0.0, key="np_stock",
             )
 
         if st.button("Προσθήκη", key="np_submit"):
@@ -192,7 +202,7 @@ with tab_inventory:
                     house=house.strip(),
                     original_name=original_name.strip(),
                     signature_name=signature_name_clean,
-                    stock_ml=stock_ml,
+                    stock_ml=to_ml(stock_ml),
                     product_type=product_type,
                 )
                 for k in ("np_house", "np_original", "np_signature", "np_stock",
@@ -251,7 +261,7 @@ with tab_inventory:
                     house=str(record.get("house") or "").strip(),
                     original_name=str(record.get("original_name") or "").strip(),
                     signature_name=signature_name,
-                    stock_ml=float(record.get("stock_ml") or 0),
+                    stock_ml=to_ml(record.get("stock_ml")),
                     product_type=record.get("product_type") or db.infer_product_type(code),
                 )
                 return f"Το προϊόν '{signature_name}' προστέθηκε ({code})."
@@ -262,7 +272,7 @@ with tab_inventory:
                     house=record["house"] or "",
                     original_name=record["original_name"] or "",
                     signature_name=record["signature_name"],
-                    stock_ml=float(record["stock_ml"] or 0),
+                    stock_ml=to_ml(record["stock_ml"]),
                     product_type=record.get("product_type") or "έλαια",
                 )
             else:
@@ -279,7 +289,7 @@ with tab_inventory:
             column_config={
                 "Κατηγορία": st.column_config.SelectboxColumn(options=db.CATEGORIES),
                 "Είδος": st.column_config.SelectboxColumn(options=db.PRODUCT_TYPES),
-                "Στοκ": st.column_config.NumberColumn(help="ml"),
+                "Στοκ": ml_column(help="ml"),
             },
             disabled=[],
             apply_changes=apply_product,
@@ -291,7 +301,7 @@ with tab_inventory:
         )
     else:
         df = pd.DataFrame([dict(p) for p in products]).drop(columns=["id", "created_at"]).rename(columns=PRODUCT_RENAME)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True, column_config={"Στοκ": ml_column()})
         st.caption(count_label if len(products) != len(all_products) else f"{len(products)} προϊόντα συνολικά")
 
 
@@ -308,9 +318,10 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
                     date = st.date_input("Ημερομηνία *", value=datetime.date.today(), key=f"{kind}_date")
                     sel = st.selectbox("Προϊόν *", options.keys(), key=f"{kind}_product")
                 with col2:
-                    ml = st.number_input(f"{ml_label} *", min_value=0.0, step=10.0, value=0.0, key=f"{kind}_ml")
+                    ml = st.number_input(f"{ml_label} *", min_value=0.0, step=0.01, format="%.2f", value=0.0, key=f"{kind}_ml")
                     comments = st.text_input("Σχόλια", key=f"{kind}_comments")
                 if st.form_submit_button("Προσθήκη"):
+                    ml = to_ml(ml)
                     if ml <= 0:
                         st.error(f"Τα {ml_label} πρέπει να είναι μεγαλύτερα από 0.")
                     else:
@@ -318,9 +329,9 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
                         add_fn(date=date.isoformat(), code=code, ml=ml, comments=comments.strip())
                         new_stock = db.get_product(code)["stock_ml"]
                         if new_stock < 0:
-                            st.warning(f"Καταχωρήθηκε. Προσοχή: αρνητικό στοκ ({new_stock:g} ml).")
+                            st.warning(f"Καταχωρήθηκε. Προσοχή: αρνητικό στοκ ({new_stock:.2f} ml).")
                         else:
-                            st.success(f"Καταχωρήθηκε. Νέο στοκ: {new_stock:g} ml.")
+                            st.success(f"Καταχωρήθηκε. Νέο στοκ: {new_stock:.2f} ml.")
         st.divider()
 
     st.subheader(f"Ιστορικό {label}")
@@ -344,18 +355,19 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
                     date = datetime.date.fromisoformat(str(date).strip()).isoformat()
                 except ValueError:
                     raise ValueError("Η ημερομηνία πρέπει να είναι της μορφής ΕΕΕΕ-ΜΜ-ΗΗ.")
-                if float(ml) <= 0:
+                ml = to_ml(ml)
+                if ml <= 0:
                     raise ValueError(f"Τα {ml_label} πρέπει να είναι μεγαλύτερα από 0.")
-                add_fn(date=date, code=code, ml=float(ml),
+                add_fn(date=date, code=code, ml=ml,
                        comments=str(record.get("comments") or "").strip())
                 new_stock = db.get_product(code)["stock_ml"]
-                return f"Καταχωρήθηκε ({code}). Νέο στοκ: {new_stock:g}."
+                return f"Καταχωρήθηκε ({code}). Νέο στοκ: {new_stock:.2f} ml."
             elif action == "update":
                 update_fn(
                     row_id=int(record["id"]),
                     date=str(record["date"]),
                     code=record["code"],
-                    ml=float(record["ml"] or 0),
+                    ml=to_ml(record["ml"]),
                     comments=record["comments"] or "",
                 )
             else:
@@ -367,7 +379,7 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
             drop_cols=["signature_name", "category"],
             rename=rename,
             column_config={
-                ml_label: st.column_config.NumberColumn(step=10.0),
+                ml_label: ml_column(),
                 "Κωδικός": st.column_config.SelectboxColumn(options=list(options.values())),
                 "Ημερομηνία": st.column_config.TextColumn(help="ΕΕΕΕ-ΜΜ-ΗΗ"),
             },
@@ -381,7 +393,7 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
         )
     else:
         df = pd.DataFrame([dict(r) for r in rows]).drop(columns=["id"]).rename(columns=rename)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True, column_config={ml_label: ml_column()})
         st.caption(f"{len(rows)} συνολικά")
 
 
@@ -410,15 +422,15 @@ with tab_dashboard:
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Προϊόντα", stats["product_count"])
-    col2.metric("Τρέχον στοκ", f"{stats['total_stock_ml']:g} ml")
-    col3.metric("Πωλήσεις", stats["sales_count"], f"{stats['total_sold_ml']:g} ml")
-    col4.metric("Αγορές", stats["purchases_count"], f"{stats['total_purchased_ml']:g} ml")
+    col2.metric("Τρέχον στοκ", f"{stats['total_stock_ml']:.2f} ml")
+    col3.metric("Πωλήσεις", stats["sales_count"], f"{stats['total_sold_ml']:.2f} ml")
+    col4.metric("Αγορές", stats["purchases_count"], f"{stats['total_purchased_ml']:.2f} ml")
 
     st.divider()
     st.subheader("ML πωλήσεων ανά κατηγορία")
     sold_by_category = stats["sold_by_category"]
     if sold_by_category:
-        df_cat = pd.DataFrame([dict(r) for r in sold_by_category]).set_index("category")
+        df_cat = pd.DataFrame([dict(r) for r in sold_by_category]).set_index("category").round(2)
         st.bar_chart(df_cat)
     else:
         st.info("Δεν υπάρχουν ακόμα δεδομένα πωλήσεων.")
@@ -427,14 +439,14 @@ with tab_dashboard:
     st.subheader("Χαμηλό στοκ")
 
     threshold = st.number_input(
-        "Όριο ειδοποίησης (ml)", min_value=0, value=100, step=10, key="low_stock_ml",
+        "Όριο ειδοποίησης (ml)", min_value=0.0, value=100.0, step=0.01, format="%.2f", key="low_stock_ml",
     )
     low_stock = db.get_low_stock_products(
         threshold=threshold, categories=categories, product_types=product_types,
     )
     if low_stock:
         df_low = pd.DataFrame([dict(p) for p in low_stock]).drop(columns=["id", "created_at"]).rename(columns=PRODUCT_RENAME)
-        st.dataframe(df_low, use_container_width=True, hide_index=True)
-        st.caption(f"{len(low_stock)} προϊόντα κάτω από {threshold} ml")
+        st.dataframe(df_low, use_container_width=True, hide_index=True, column_config={"Στοκ": ml_column()})
+        st.caption(f"{len(low_stock)} προϊόντα κάτω από {threshold:.2f} ml")
     else:
-        st.success(f"Κανένα προϊόν κάτω από {threshold} ml.")
+        st.success(f"Κανένα προϊόν κάτω από {threshold:.2f} ml.")

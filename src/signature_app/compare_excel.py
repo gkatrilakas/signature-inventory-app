@@ -134,7 +134,7 @@ def _print_section(title: str, lines: list[str], limit: int) -> bool:
 
 
 def _fmt_row(r: tuple) -> str:
-    return f"{r[0]}  {r[1]}  {r[2]:g} ml  {r[3]}".rstrip()
+    return f"{r[0]}  {r[1]}  {r[2]:.2f} ml  {r[3]}".rstrip()
 
 
 def _fmt_changes(changed: dict) -> list[str]:
@@ -205,7 +205,7 @@ def compare_db(new, limit: int) -> bool:
     print("Stock (expected = file baseline + purchases - sales)")
     expected = expected_stock(new[0], new[1]["purchases"], new[1]["sales"])
     mismatches = [
-        f"{code}: DB {db_products[code]['stock']:g} vs expected {exp:g}"
+        f"{code}: DB {db_products[code]['stock']:.2f} vs expected {exp:.2f}"
         for code, exp in sorted(expected.items())
         if code in db_products and abs(db_products[code]["stock"] - exp) > STOCK_TOLERANCE
     ]

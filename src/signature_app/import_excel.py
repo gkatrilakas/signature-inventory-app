@@ -46,7 +46,7 @@ def main() -> None:
                     house or None,
                     original_name or None,
                     signature_name,
-                    float(stock_ml) if stock_ml else 0.0,
+                    round(float(stock_ml), 2) if stock_ml else 0.0,
                     db.infer_product_type(code),
                 ),
             )
@@ -79,7 +79,7 @@ def import_transactions(conn, known_codes, wb, sheet_name: str, label: str) -> N
         if code not in known_codes:
             skipped += 1
             continue
-        ml = float(ml)
+        ml = round(float(ml), 2)
         conn.execute(
             f"INSERT INTO {table} (date, code, ml, comments) VALUES (%s, %s, %s, %s)",
             (date.date().isoformat(), code, ml, comments or None),

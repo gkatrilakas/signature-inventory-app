@@ -101,7 +101,7 @@ def init_db() -> None:
                 house TEXT,
                 original_name TEXT,
                 signature_name TEXT NOT NULL,
-                stock_ml REAL NOT NULL DEFAULT 0,
+                stock_ml DOUBLE PRECISION NOT NULL DEFAULT 0,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -128,7 +128,7 @@ def init_db() -> None:
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 date TEXT NOT NULL,
                 code TEXT NOT NULL REFERENCES products(code),
-                ml REAL NOT NULL,
+                ml DOUBLE PRECISION NOT NULL,
                 comments TEXT,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -140,12 +140,24 @@ def init_db() -> None:
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 date TEXT NOT NULL,
                 code TEXT NOT NULL REFERENCES products(code),
-                ml REAL NOT NULL,
+                ml DOUBLE PRECISION NOT NULL,
                 comments TEXT,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        # REAL only holds ~7 significant digits, not enough for ml to 2 decimals.
+        for table, column in (("products", "stock_ml"), ("purchases", "ml"), ("sales", "ml")):
+            data_type = conn.execute(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_name = %s AND column_name = %s",
+                (table, column),
+            ).fetchone()["data_type"]
+            if data_type == "real":
+                conn.execute(
+                    f"ALTER TABLE {table} ALTER COLUMN {column} TYPE DOUBLE PRECISION "
+                    f"USING round({column}::numeric, 2)"
+                )
 
 
 def code_exists(code: str) -> bool:
