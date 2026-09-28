@@ -9,7 +9,6 @@ from psycopg_pool import ConnectionPool
 
 CATEGORIES = ["ΓΥΝΑΙΚΕΙΑ", "ΑΝΤΡΙΚΑ", "UNISEX", "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ"]
 
-PIECES_CATEGORY = "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ"
 
 PRODUCT_TYPES = ["έλαια", "άρωμα"]
 
@@ -20,11 +19,6 @@ CATEGORY_PREFIX = {
     "ΑΡΩΜΑΤΙΚΑ ΧΩΡΟΥ / ΑΥΤ": "ΑΧ",
 }
 TYPE_LETTER = {"έλαια": "E", "άρωμα": "P"}
-
-
-def unit_for(category: str) -> str:
-    """Stock unit for a category: room fragrances are measured in pieces, everything else in ml."""
-    return "τεμάχια" if category == PIECES_CATEGORY else "ml"
 
 
 def infer_product_type(code: str) -> str:
@@ -301,21 +295,14 @@ def get_low_stock_products(
     threshold: float = 100.0,
     categories: list[str] | None = None,
     product_types: list[str] | None = None,
-    unit: str = "ml",
 ) -> list[dict]:
-    """Products at or below `threshold`, restricted to those tracked in `unit`.
-
-    ml and τεμάχια aren't on the same scale, so a single threshold can't mean
-    both at once — callers pick one unit per call.
-    """
+    """Products with stock at or below `threshold` ml."""
     where, params = _product_filter(categories, product_types)
-    unit_op = "=" if unit == "τεμάχια" else "!="
     prefix = f"{where} AND" if where else " WHERE"
     with get_connection() as conn:
         return conn.execute(
-            f"SELECT pr.* FROM products pr{prefix} pr.category {unit_op} %s "
-            "AND pr.stock_ml <= %s ORDER BY pr.stock_ml ASC",
-            [*params, PIECES_CATEGORY, threshold],
+            f"SELECT pr.* FROM products pr{prefix} pr.stock_ml <= %s ORDER BY pr.stock_ml ASC",
+            [*params, threshold],
         ).fetchall()
 
 

@@ -43,7 +43,7 @@ env var or `admin_password` in `.streamlit/secrets.toml` (defaults to `admin`).
 ## Tabs
 
 - **📦 Αποθήκη** — products and current inventory. Each product has an **Είδος**
-  (έλαια → stock in ml, άρωμα → stock in τεμάχια). When adding a product the
+  (έλαια or άρωμα); all stock is in ml. When adding a product the
   **Κωδικός** is pre-filled with the next free code for the chosen
   category/είδος (e.g. `WP-057`).
 - **🛒 Αγορές** — purchase history.
