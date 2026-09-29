@@ -158,6 +158,10 @@ def init_db() -> None:
                     f"ALTER TABLE {table} ALTER COLUMN {column} TYPE DOUBLE PRECISION "
                     f"USING round({column}::numeric, 2)"
                 )
+        # With RLS on and no policies, Supabase's public API can't touch these
+        # tables; the app connects as the table owner, which RLS doesn't apply to.
+        for table in ("products", "purchases", "sales"):
+            conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
 
 
 def code_exists(code: str) -> bool:
