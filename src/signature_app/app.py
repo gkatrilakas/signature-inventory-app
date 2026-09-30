@@ -346,7 +346,14 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
     if not rows:
         st.info(f"Δεν υπάρχουν ακόμα {label}.")
     elif is_admin:
+        # The grid shows "CODE — Signature name" so admins can tell products
+        # apart; apply_txn maps the label back to the code.
+        code_labels = {code: lbl for lbl, code in options.items()}
+        admin_rows = [{**dict(r), "code": code_labels.get(r["code"], r["code"])} for r in rows]
+
         def apply_txn(action, record):
+            if record.get("code"):
+                record = {**record, "code": options.get(record["code"], record["code"])}
             if action == "insert":
                 date, code, ml = record.get("date"), record.get("code"), record.get("ml")
                 if not (date and code and ml):
@@ -375,21 +382,21 @@ def transaction_tab(kind, label, rows, add_fn, update_fn, delete_fn, ml_label):
 
         editable_table(
             key=f"{kind}_editor",
-            rows=rows,
+            rows=admin_rows,
             drop_cols=["signature_name", "category"],
-            rename=rename,
+            rename={**rename, "code": "Προϊόν"},
             column_config={
                 ml_label: ml_column(),
-                "Κωδικός": st.column_config.SelectboxColumn(options=list(options.values())),
+                "Προϊόν": st.column_config.SelectboxColumn(options=list(options.keys()), width="large"),
                 "Ημερομηνία": st.column_config.TextColumn(help="ΕΕΕΕ-ΜΜ-ΗΗ"),
             },
             disabled=["id"],
             apply_changes=apply_txn,
-            locked=["Κωδικός"],
+            locked=["Προϊόν"],
         )
         st.caption(
             f"{len(rows)} εγγραφές — νέες γραμμές καταχωρούνται μόλις συμπληρωθούν Ημερομηνία, "
-            f"Κωδικός και {ml_label}· Κωδικός δεν αλλάζει σε υπάρχουσες· το στοκ ενημερώνεται αυτόματα"
+            f"Προϊόν και {ml_label}· Προϊόν δεν αλλάζει σε υπάρχουσες· το στοκ ενημερώνεται αυτόματα"
         )
     else:
         df = pd.DataFrame([dict(r) for r in rows]).drop(columns=["id"]).rename(columns=rename)
