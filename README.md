@@ -31,9 +31,15 @@ Opens at [http://localhost:8501](http://localhost:8501).
 
 ## Roles
 
-The app opens in a read-only **Sales** view. Enter the admin password in the
-sidebar to unlock editing. Set the password via the `SIGNATURE_ADMIN_PASSWORD`
-env var or `admin_password` in `.streamlit/secrets.toml` (defaults to `admin`).
+The app opens on a login page; nothing is shown until a password is entered.
+The password decides the role:
+
+- `sales_password` → read-only **Sales** view
+- `admin_password` → **Admin** view with editing
+
+Set them in `.streamlit/secrets.toml` (or the `SIGNATURE_SALES_PASSWORD` /
+`SIGNATURE_ADMIN_PASSWORD` env vars). There are no defaults — a role whose
+password isn't set can't log in.
 
 - **Sales view** — every tab is read-only.
 - **Admin view** — add rows via the forms, and edit cells or delete rows

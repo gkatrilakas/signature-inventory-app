@@ -1,5 +1,7 @@
 import datetime
+import hmac
 import os
+import time
 
 import pandas as pd
 import streamlit as st
@@ -7,14 +9,24 @@ import streamlit as st
 from signature_app import db
 
 
-def admin_password() -> str:
-    """Admin password from st.secrets or the SIGNATURE_ADMIN_PASSWORD env var."""
+def role_password(role: str) -> str | None:
+    """Password for a role ("admin" / "sales") from st.secrets (`<role>_password`)
+    or the SIGNATURE_<ROLE>_PASSWORD env var. No default: an unset role can't log in."""
     try:
-        if "admin_password" in st.secrets:
-            return str(st.secrets["admin_password"])
+        if f"{role}_password" in st.secrets:
+            return str(st.secrets[f"{role}_password"]) or None
     except Exception:
         pass
-    return os.environ.get("SIGNATURE_ADMIN_PASSWORD", "admin")
+    return os.environ.get(f"SIGNATURE_{role.upper()}_PASSWORD") or None
+
+
+def check_login(pw: str) -> str | None:
+    """Return the role the password unlocks, or None. Admin is checked first."""
+    for role in ("admin", "sales"):
+        expected = role_password(role)
+        if expected and hmac.compare_digest(pw.encode(), expected.encode()):
+            return role
+    return None
 
 
 def to_ml(value) -> float:
@@ -40,27 +52,36 @@ def init_db_once() -> None:
 
 st.set_page_config(page_title="Signature", page_icon="🧴", layout="wide")
 
+if not st.session_state.get("role"):
+    # Login gate: nothing below (including the DB) runs until a role is set.
+    _, center, _ = st.columns([1, 1, 1])
+    with center:
+        st.title("🧴 Signature")
+        st.subheader("Σύνδεση")
+        with st.form("login_form"):
+            pw = st.text_input("Κωδικός", type="password")
+            if st.form_submit_button("Σύνδεση", width="stretch"):
+                role = check_login(pw)
+                if role:
+                    st.session_state.role = role
+                    st.rerun()
+                time.sleep(1)  # slow down password guessing
+                st.error("Λάθος κωδικός.")
+    st.stop()
+
 init_db_once()
+
+is_admin = st.session_state.role == "admin"
 
 with st.sidebar:
     st.header("Πρόσβαση")
-    if st.session_state.get("is_admin"):
+    if is_admin:
         st.success("Συνδεδεμένος ως **Admin** — επεξεργασία ενεργή")
-        if st.button("Αποσύνδεση"):
-            st.session_state.is_admin = False
-            st.rerun()
     else:
-        st.info("Προβολή **Πωλήσεων** (μόνο ανάγνωση)")
-        with st.form("login_form"):
-            pw = st.text_input("Κωδικός admin", type="password")
-            if st.form_submit_button("Σύνδεση ως Admin"):
-                if pw == admin_password():
-                    st.session_state.is_admin = True
-                    st.rerun()
-                else:
-                    st.error("Λάθος κωδικός.")
-
-is_admin = bool(st.session_state.get("is_admin"))
+        st.info("Συνδεδεμένος ως **Πωλήσεις** — μόνο ανάγνωση")
+    if st.button("Αποσύνδεση"):
+        st.session_state.clear()
+        st.rerun()
 
 st.title("🧴 Signature")
 st.caption("Προβολή Admin — πλήρης επεξεργασία" if is_admin else "Προβολή Πωλήσεων — μόνο ανάγνωση")
