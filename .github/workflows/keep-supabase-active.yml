@@ -1,0 +1,23 @@
+name: Keep Supabase project active
+
+# Supabase pauses free-tier projects after ~7 days without activity.
+# One tiny read query a day is enough to count as activity.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily at 06:17 UTC
+  workflow_dispatch:         # allows manual runs from the Actions tab
+
+jobs:
+  ping-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query the database
+        env:
+          # Repo secret: the same postgres_url as in .streamlit/secrets.toml
+          # (session pooler URL — GitHub runners can't reach the IPv6-only direct host).
+          DATABASE_URL: ${{ secrets.SIGNATURE_DB_URL }}
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tA \
+            -c "SELECT count(*) AS products FROM products;"
